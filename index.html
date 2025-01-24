@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video and Photo Processor</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f4f4f4;
+        }
+        .container {
+            text-align: center;
+            padding: 20px;
+            background-color: white;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+            width: 500px;
+        }
+        input[type="file"] {
+            margin: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #status {
+            margin-top: 20px;
+        }
+        #progress-container {
+            width: 100%;
+            background-color: #f3f3f3;
+            margin-top: 20px;
+            height: 20px;
+            border-radius: 5px;
+            overflow: hidden;
+            display: none;
+        }
+        #progress-bar {
+            width: 0%;
+            height: 100%;
+            background-color: #4CAF50;
+            transition: width 0.1s ease;
+        }
+        #downloadBtn {
+            margin-top: 20px;
+            padding: 10px 20px;
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            cursor: pointer;
+            display: none;
+        }
+        #downloadBtn:hover {
+            background-color: #0b7dda;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Upload Video and Photo</h2>
+        <input type="file" id="videoInput" accept="video/*" />
+        <input type="file" id="photoInput" accept="image/*" />
+        <br>
+        <button onclick="processVideo()">Process Video</button>
+        
+        <div id="status"></div>
+
+        <div id="progress-container">
+            <div id="progress-bar"></div>
+            </div>
+
+        <button id="downloadBtn" onclick="downloadProcessedVideo()">Download Processed Video</button>
+    </div>
+
+    <script>
+        let processedBlob = null;
+        let mediaRecorder = null;
+        let recordedChunks = [];
+
+        function processVideo() {
+            let videoInput = document.getElementById('videoInput').files[0];
+            let photoInput = document.getElementById('photoInput').files[0];
+            if (!videoInput || !photoInput) {
+                alert('Please upload both a video and a photo.');
+                return;
+            }
+
+            document.getElementById('status').innerText = "Processing...";
+            document.getElementById('progress-container').style.display = "block";
+            document.getElementById('progress-bar').style.width = "0%";
+
+            let videoElement = document.createElement('video');
+            let canvas = document.createElement('canvas');
+            let context = canvas.getContext('2d');
+
+            let videoURL = URL.createObjectURL(videoInput);
+            videoElement.src = videoURL;
+            videoElement.load();
+
+            videoElement.onloadedmetadata = () => {
+                canvas.width = videoElement.videoWidth;
+                canvas.height = videoElement.videoHeight;
+        let videoDuration = videoElement.duration;
+
+                let photo = new Image();
+                let reader = new FileReader();
+                reader.onload = function(event) {
+                    photo.src = event.target.result;
+                    photo.onload = function() {
+                        startRecording(videoElement, canvas, context, photo, videoDuration);
+                    };
+                };
+                reader.readAsDataURL(photoInput);
+            };
+        }
+
+        function startRecording(videoElement, canvas, context, photo, videoDuration) {
+            let lastFrameTime = videoDuration - 5;  // last 5 seconds of video
+            let photoWidth = videoElement.videoWidth * 0.8;
+            let photoHeight = videoElement.videoHeight * 0.8;
+
+            let currentTime = 0;
+            let stream = canvas.captureStream(30); // capture 30fps
+            mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+
+            mediaRecorder.ondataavailable = function(event) {
+                recordedChunks.push(event.data);
+            };
+
+            mediaRecorder.onstop = function() {
+                processedBlob = new Blob(recordedChunks, { type: 'video/webm' });
+                
+        document.getElementById('status').innerText = "Processing Complete!";
+                document.getElementById('downloadBtn').style.display = 'inline-block';
+            };
+
+            mediaRecorder.start();
+            videoElement.play();
+
+            videoElement.ontimeupdate = () => {
+                if (currentTime < lastFrameTime) {
+                    context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+                    currentTime = videoElement.currentTime;
+                    updateProgressBar(currentTime, videoDuration);
+                }
+
+                if (videoElement.currentTime >= lastFrameTime) {
+                    context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+                    applyBlurEffect(context, canvas);
+                    overlayPhoto(context, photo, photoWidth, photoHeight, canvas);
+                    videoElement.pause();
+                }
+            };
+        }
+
+        function applyBlurEffect(context, canvas) {
+            let imgData = context.getImageData(0, 0, canvas.width, canvas.height);
+            let pixelData = imgData.data;
+            for (let i = 0; i < pixelData.length; i += 4) {
+                pixelData[i] = pixelData[i] * 0.5;
+                
+        pixelData[i + 1] = pixelData[i + 1] * 0.5;
+                pixelData[i + 2] = pixelData[i + 2] * 0.5;
+            }
+            context.putImageData(imgData, 0, 0);
+        }
+
+        function overlayPhoto(context, photo, width, height, canvas) {
+            let x = (canvas.width - width) / 2;
+            let y = (canvas.height - height) / 2;
+            context.drawImage(photo, x, y, width, height);
+        }
+
+        function updateProgressBar(currentTime, videoDuration) {
+            let progress = (currentTime / videoDuration) * 100;
+            document.getElementById('progress-bar').style.width = progress + "%";
+        }
+
+        function downloadProcessedVideo() {
+            let link = document.createElement('a');
+            link.href = URL.createObjectURL(processedBlob);
+            link.download = "processed_video.webm";
+            link.click();
+        }
+    </script>
+</body>
+</html>
