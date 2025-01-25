@@ -1,197 +1,176 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Video and Photo Processor</title>
+    <title>Client-Side Video Processor</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-            background-color: #f4f4f4;
-        }
-        .container {
-            text-align: center;
-            padding: 20px;
-            background-color: white;
-            box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
-            width: 500px;
-        }
-        input[type="file"] {
-            margin: 10px;
-        }
-        button {
-            padding: 10px 20px;
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            cursor: pointer;
-        }
-        button:hover {
-            background-color: #45a049;
-        }
-        #status {
+        .progress-container {
             margin-top: 20px;
+            width: 300px;
+            border: 1px solid #ddd;
         }
-        #progress-container {
+
+        .progress-bar-container {
             width: 100%;
-            background-color: #f3f3f3;
-            margin-top: 20px;
-            height: 20px;
-            border-radius: 5px;
-            overflow: hidden;
-            display: none;
+            background-color: #f0f0f0;
         }
-        #progress-bar {
+
+        .progress-bar {
             width: 0%;
-            height: 100%;
+            height: 20px;
             background-color: #4CAF50;
-            transition: width 0.1s ease;
-        }
-        #downloadBtn {
-            margin-top: 20px;
-            padding: 10px 20px;
-            background-color: #2196F3;
-            color: white;
-            border: none;
-            cursor: pointer;
-            display: none;
-        }
-        #downloadBtn:hover {
-            background-color: #0b7dda;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h2>Upload Video and Photo</h2>
-        <input type="file" id="videoInput" accept="video/*" />
-        <input type="file" id="photoInput" accept="image/*" />
-        <br>
-        <button onclick="processVideo()">Process Video</button>
-        
-        <div id="status"></div>
+    <h1>Client-Side Video & Photo Merger</h1>
+    <form id="upload-form" enctype="multipart/form-data">
+        <input type="file" id="video-upload" accept="video/*" required><br><br>
+        <input type="file" id="photo-upload" accept="image/*" required><br><br>
+        <button type="submit">Process</button>
+    </form>
 
-        <div id="progress-container">
-            <div id="progress-bar"></div>
-            </div>
-
-        <button id="downloadBtn" onclick="downloadProcessedVideo()">Download Processed Video</button>
+    <div id="progress-container" class="progress-container" style="display: none;">
+        <div class="progress-bar-container">
+            <div id="progress-bar" class="progress-bar"></div>
+        </div>
+        <div id="progress-status"></div>
     </div>
 
+     <div id="download-link-container" style="display: none;">
+        <a id="download-link" href="#" download="output.mp4">Download Video</a>
+    </div>
+
+    <canvas id="output-canvas" style="display: none;"></canvas>
+    <video id="source-video" style="display: none;"></video>
+    <img id="source-image" style="display: none;">
+
     <script>
-        let processedBlob = null;
-        let mediaRecorder = null;
+        const form = document.getElementById('upload-form');
+        const videoInput = document.getElementById('video-upload');
+        const photoInput = document.getElementById('photo-upload');
+        const progressBar = document.getElementById('progress-bar');
+        const progressStatus = document.getElementById('progress-status');
+        const progressContainer = document.getElementById('progress-container');
+        const downloadLinkContainer = document.getElementById('download-link-container');
+        const downloadLink = document.getElementById('download-link');
+        const outputCanvas = document.getElementById('output-canvas');
+        const sourceVideo = document.getElementById('source-video');
+        const sourceImage = document.getElementById('source-image');
+
+        let mediaRecorder;
         let recordedChunks = [];
 
-        function processVideo() {
-            let videoInput = document.getElementById('videoInput').files[0];
-            let photoInput = document.getElementById('photoInput').files[0];
-            if (!videoInput || !photoInput) {
-                alert('Please upload both a video and a photo.');
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const videoFile = videoInput.files[0];
+            const photoFile = photoInput.files[0];
+
+            if (!videoFile || !photoFile) {
+                progressStatus.textContent = "Please upload both a video and a photo.";
                 return;
             }
 
-            document.getElementById('status').innerText = "Processing...";
-            document.getElementById('progress-container').style.display = "block";
-            document.getElementById('progress-bar').style.width = "0%";
+            progressContainer.style.display = 'block';
+            progressStatus.textContent = "Processing...";
+            progressBar.style.width = "0%";
 
-            let videoElement = document.createElement('video');
-            let canvas = document.createElement('canvas');
-            let context = canvas.getContext('2d');
+            try {
+                await processVideo(videoFile, photoFile);
 
-            let videoURL = URL.createObjectURL(videoInput);
-            videoElement.src = videoURL;
-            videoElement.load();
+            } catch (error) {
+                progressStatus.textContent = `Error: ${error.message}`;
+                console.error("Error processing video", error);
+            }
+        });
 
-            videoElement.onloadedmetadata = () => {
-                canvas.width = videoElement.videoWidth;
-                canvas.height = videoElement.videoHeight;
-        let videoDuration = videoElement.duration;
+        async function processVideo(videoFile, photoFile) {
+           
+            const videoURL = URL.createObjectURL(videoFile);
+            const photoURL = URL.createObjectURL(photoFile);
+            
+            sourceVideo.src = videoURL;
+            sourceImage.src = photoURL;
+            
+            await new Promise((resolve, reject) => {
+                sourceVideo.onloadedmetadata = resolve;
+                sourceVideo.onerror = reject;
+                sourceImage.onload = resolve;
+                sourceImage.onerror = reject;
+            });
+            
 
-                let photo = new Image();
-                let reader = new FileReader();
-                reader.onload = function(event) {
-                    photo.src = event.target.result;
-                    photo.onload = function() {
-                        startRecording(videoElement, canvas, context, photo, videoDuration);
-                    };
-                };
-                reader.readAsDataURL(photoInput);
-            };
-        }
+            const videoWidth = sourceVideo.videoWidth;
+            const videoHeight = sourceVideo.videoHeight;
+            
+            outputCanvas.width = videoWidth;
+            outputCanvas.height = videoHeight;
+            
+            const canvasContext = outputCanvas.getContext("2d");
 
-        function startRecording(videoElement, canvas, context, photo, videoDuration) {
-            let lastFrameTime = videoDuration - 5;  // last 5 seconds of video
-            let photoWidth = videoElement.videoWidth * 0.8;
-            let photoHeight = videoElement.videoHeight * 0.8;
+            const frameRate = 30;
+            const duration = sourceVideo.duration;
+            const totalFrames = Math.floor(duration * frameRate);
+            const photoOverlayDurationFrames = 5 * frameRate;
+            const photoOverlayStartFrame = Math.max(0, totalFrames - photoOverlayDurationFrames);
 
-            let currentTime = 0;
-            let stream = canvas.captureStream(30); // capture 30fps
-            mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+            const photoOverlayWidth = videoWidth * 0.8;
+            const photoOverlayHeight = videoHeight * 0.8;
+            const photoOverlayX = (videoWidth - photoOverlayWidth) / 2;
+            const photoOverlayY = (videoHeight - photoOverlayHeight) / 2;
+            
+            const stream = outputCanvas.captureStream(frameRate);
+            mediaRecorder = new MediaRecorder(stream, {mimeType:'video/webm'});
 
-            mediaRecorder.ondataavailable = function(event) {
-                recordedChunks.push(event.data);
-            };
+            mediaRecorder.ondataavailable = event => {
+                if (event.data && event.data.size > 0) {
+                    recordedChunks.push(event.data);
+                }
+            }
 
-            mediaRecorder.onstop = function() {
-                processedBlob = new Blob(recordedChunks, { type: 'video/webm' });
-                
-        document.getElementById('status').innerText = "Processing Complete!";
-                document.getElementById('downloadBtn').style.display = 'inline-block';
-            };
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(recordedChunks, {type:'video/webm'});
+                recordedChunks = [];
+                const downloadUrl = URL.createObjectURL(blob);
+                downloadLink.href = downloadUrl;
+                downloadLinkContainer.style.display = "block";
+                progressStatus.textContent = "Video Processing Complete!";
+                progressBar.style.width = "100%";
+                URL.revokeObjectURL(videoURL)
+                URL.revokeObjectURL(photoURL)
+                sourceVideo.src = "";
+                sourceImage.src = "";
+                outputCanvas.getContext("2d").clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+            }
 
             mediaRecorder.start();
-            videoElement.play();
-
-            videoElement.ontimeupdate = () => {
-                if (currentTime < lastFrameTime) {
-                    context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-                    currentTime = videoElement.currentTime;
-                    updateProgressBar(currentTime, videoDuration);
+            
+            
+            let frameCounter = 0;
+            
+            function drawFrame(){
+                if (frameCounter >= totalFrames){
+                    mediaRecorder.stop();
+                    return;
                 }
-
-                if (videoElement.currentTime >= lastFrameTime) {
-                    context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-                    applyBlurEffect(context, canvas);
-                    overlayPhoto(context, photo, photoWidth, photoHeight, canvas);
-                    videoElement.pause();
-                }
-            };
-        }
-
-        function applyBlurEffect(context, canvas) {
-            let imgData = context.getImageData(0, 0, canvas.width, canvas.height);
-            let pixelData = imgData.data;
-            for (let i = 0; i < pixelData.length; i += 4) {
-                pixelData[i] = pixelData[i] * 0.5;
+                sourceVideo.currentTime = frameCounter / frameRate;
                 
-        pixelData[i + 1] = pixelData[i + 1] * 0.5;
-                pixelData[i + 2] = pixelData[i + 2] * 0.5;
+                canvasContext.drawImage(sourceVideo, 0, 0, videoWidth, videoHeight);
+
+                if(frameCounter >= photoOverlayStartFrame){
+                    canvasContext.drawImage(sourceImage, photoOverlayX, photoOverlayY, photoOverlayWidth, photoOverlayHeight);
+                }
+
+                frameCounter++;
+                const progress = (frameCounter/ totalFrames) * 100;
+                progressBar.style.width = `${progress}%`;
+                window.requestAnimationFrame(drawFrame);
             }
-            context.putImageData(imgData, 0, 0);
-        }
-
-        function overlayPhoto(context, photo, width, height, canvas) {
-            let x = (canvas.width - width) / 2;
-            let y = (canvas.height - height) / 2;
-            context.drawImage(photo, x, y, width, height);
-        }
-
-        function updateProgressBar(currentTime, videoDuration) {
-            let progress = (currentTime / videoDuration) * 100;
-            document.getElementById('progress-bar').style.width = progress + "%";
-        }
-
-        function downloadProcessedVideo() {
-            let link = document.createElement('a');
-            link.href = URL.createObjectURL(processedBlob);
-            link.download = "processed_video.webm";
-            link.click();
+            
+            sourceVideo.play();
+            
+            
+            drawFrame();
         }
     </script>
 </body>
